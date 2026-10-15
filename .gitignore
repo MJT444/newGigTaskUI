@@ -4,3 +4,14 @@ __pycache__/
 *.csv
 *.dump
 *.zip
+*.pyc
+
+# Local application dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Local configuration and OS files
+.env.*
+!.env.example
+.DS_Store
