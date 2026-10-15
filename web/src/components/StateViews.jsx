@@ -20,12 +20,19 @@ export function EmptyState({ title = 'Nothing here yet', children }) {
   );
 }
 
-export function ErrorState({ error, onRetry }) {
+/**
+ * "Try again" is offered only when trying again can help (no answer, or a
+ * server/database problem). A bad link or value (4xx) fails the same way
+ * every time, so the screen offers its own way out through `children`.
+ */
+export function ErrorState({ error, onRetry, title = 'Could not load this', children }) {
+  const retryable = !error?.status || error.status >= 500;
   return (
     <div className="state state-error" role="alert">
-      <strong>Could not load this</strong>
+      <strong>{title}</strong>
       <p>{error?.message || 'The service is temporarily unavailable. Please try again.'}</p>
-      {onRetry && (
+      {children}
+      {onRetry && retryable && (
         <Button variant="secondary" size="sm" onClick={onRetry}>
           Try again
         </Button>

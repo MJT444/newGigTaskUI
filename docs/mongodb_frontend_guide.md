@@ -54,7 +54,7 @@ Each of the 2,000 freelancers has ~250 pings within ±0.05° (~5 km) of their ba
 
 ### Pipeline, stage by stage
 
-**Latest pings (5 nearest)** (toggle) = Part A + the 5 km limit:
+**Raw pings** (`GET /api/workers/nearby?mode=pings`, not shown in the UI; demonstrated in mongosh) = Part A + the 5 km limit:
 
 | Stage | Why |
 |---|---|
@@ -140,14 +140,19 @@ freelancer (default “all time”: ~10 reviews per freelancer per year).
 
 Optional fields differ per document — the reason it lives in MongoDB (in SQL: nullable columns plus a
 certifications table). `PortfolioCard` renders only what exists, lists present (✓) and missing (struck-through)
-optional fields, and shows the stored document on request (**Show stored document**). The API looks it up with
+optional fields (the raw document is shown in mongosh during the demo, not in the UI). The API looks it up with
 `findOne({ freelancer_id })`. Portfolios has only the `_id` index, so this scans 2,000 small documents — a few milliseconds, so no index was added to the inherited database.
 
 ## 5. Wording on screen
 
-The screens use plain language, like the PostgreSQL screens (“Workers”, “Location updates”, “Show stored document”).
-The database detail — `$geoNear`, `$facet`, indexes, TTL, query time — is kept in a collapsed **How this works**
-section at the bottom of each MongoDB screen, so it is there for the demo and the viva without getting in a user's way.
+Screens never show database names, field names or raw error text, and have no technical explanation sections; the
+exact pipelines, indexes and TTL behaviour are documented in this guide and explained in the demo video instead.
+Errors are mapped from the API's error `code` to a sentence in `web/src/api/client.js`; a bad link or value (4xx) shows
+a way out (e.g. *Go to the default job site*, *Show all freelancers*) instead of a *Try again* that would fail again.
+
+The Workers screen is a dispatch board: distance rings at 1, 3 and 5 km, one ripple from the job site when it changes,
+a *Nearest worker free to start* card (with a travel estimate at 18 km/h, the usual city speed on a scooter), the list
+grouped by distance band with avatars coloured like the map dots, and a click on a distance flies the map to that worker.
 
 ## 6. Errors and empty states
 

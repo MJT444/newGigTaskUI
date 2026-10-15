@@ -7,28 +7,32 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { api, qs } from '../api/client.js';
 import { Pagination } from '../components/DataTable.jsx';
 import { PortfolioCard } from '../components/mongo/PortfolioCard.jsx';
 import { FreelancerSearch } from '../components/pickers.jsx';
-import { EmptyState, QueryState } from '../components/StateViews.jsx';
-import { Badge, Button, Card, PageHeader, StatCard, Tabs } from '../components/ui.jsx';
-import { formatDateTime, formatInt } from '../lib/format.js';
-import { chartColors } from '../lib/theme.js';
+import { EmptyState, ErrorState, Loading, QueryState } from '../components/StateViews.jsx';
+import { Button, Card, PageHeader, Tabs } from '../components/ui.jsx';
+import { formatInt } from '../lib/format.js';
 
-const STAR_COLORS = { 1: chartColors.danger, 2: '#ea580c', 3: '#ca8a04', 4: '#65a30d', 5: chartColors.success };
+const formatDay = (value) =>
+  new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
 const PERIODS = [
   { value: '30', label: '30 days' },
   { value: '90', label: '90 days' },
   { value: '365', label: '1 year' },
   { value: 'all', label: 'All time' },
 ];
+const PERIOD_TEXT = { 30: 'in the last 30 days', 90: 'in the last 90 days', 365: 'in the last year', all: 'in total' };
 
-export function Stars({ value }) {
+/** Errors that mean "this freelancer link is wrong", not "the service failed". */
+const BAD_FREELANCER = new Set(['FREELANCER_NOT_FOUND', 'INVALID_ID']);
+
+export function Stars({ value, size }) {
   const pct = Math.max(0, Math.min(100, (Number(value) / 5) * 100));
   return (
-    <span className="stars" role="img" aria-label={`${value} out of 5 stars`}>
+    <span className={`stars ${size === 'lg' ? 'stars-lg' : ''}`} role="img" aria-label={`${Number(value).toFixed(1)} out of 5 stars`}>
       <span className="stars-bg">★★★★★</span>
       <span className="stars-fg" style={{ width: `${pct}%` }}>
         ★★★★★
@@ -36,6 +40,8 @@ export function Stars({ value }) {
     </span>
   );
 }
+
+const pct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
 
 export function ReviewsPage() {
   const [params, setParams] = useSearchParams();
@@ -57,15 +63,20 @@ export function ReviewsPage() {
     placeholderData: keepPreviousData,
   });
   const who = summary.data?.freelancer;
+  const badFreelancer = summary.isError && BAD_FREELANCER.has(summary.error?.code);
 
   return (
     <>
       <PageHeader
-        title="Reviews & portfolios"
-        description="What clients say about freelancers: ratings, most-mentioned skills and the top-rated workers, with each freelancer’s portfolio."
+        title={who ? `Reviews for ${who.name}` : 'Reviews & portfolios'}
+        description={
+          who
+            ? 'Everything clients said about this freelancer, with their portfolio.'
+            : 'What clients say about freelancers: ratings, the skills mentioned most and the top-rated workers.'
+        }
       />
 
-      <Card>
+      <Card className="reviews-controls">
         <div className="toolbar">
           <div className="field">
             <span className="field-label">Freelancer</span>
@@ -73,7 +84,7 @@ export function ReviewsPage() {
               <FreelancerSearch value={who} onSelect={(f) => choose(f.id)} />
               {freelancerId && (
                 <Button variant="ghost" size="sm" onClick={() => choose('')}>
-                  All freelancers
+                  Show all freelancers
                 </Button>
               )}
             </div>
@@ -83,143 +94,123 @@ export function ReviewsPage() {
             <Tabs label="Review period" tabs={PERIODS} value={days} onChange={setDays} />
           </div>
         </div>
-        <p className="field-hint">
-          {freelancerId ? (
-            <>
-              Showing reviews for <Link to={`/freelancers/${freelancerId}`}>{who?.name || 'this freelancer'}</Link> only.
-            </>
-          ) : (
-            'All freelancers. Pick a period, click a rating bar to filter the reviews, or click a top-rated worker.'
-          )}
-        </p>
       </Card>
 
-      <QueryState
-        query={summary}
-        loadingLabel="Loading reviews…"
-        isEmpty={(d) => d.totalReviews === 0}
-        emptyTitle="No reviews in this period"
-        empty="Try a longer period."
-      >
-        {(d) => {
-          const share = (keep) =>
-            `${Math.round((d.ratingDistribution.filter((r) => keep(r.rating)).reduce((s, r) => s + r.count, 0) / d.totalReviews) * 100)}%`;
-          return (
-            <div className={summary.isPlaceholderData ? 'is-dimmed' : ''}>
-              <div className="stats-grid">
-                <StatCard
-                  label="Average rating"
-                  value={
-                    <span className="rating-big">
-                      {Number(d.averageRating).toFixed(2)} <Stars value={d.averageRating} />
-                    </span>
-                  }
-                />
-                <StatCard label="Reviews" value={formatInt(d.totalReviews)} />
-                <StatCard label="4–5 stars" value={share((r) => r >= 4)} />
-                <StatCard label="1–2 stars" value={share((r) => r <= 2)} />
-              </div>
+      {badFreelancer ? (
+        <ErrorState title="We couldn’t find that freelancer" error={summary.error}>
+          <Button size="sm" onClick={() => choose('')}>
+            Show all freelancers
+          </Button>
+        </ErrorState>
+      ) : (
+        <>
+          <QueryState
+            query={summary}
+            loadingLabel="Loading reviews…"
+            isEmpty={(d) => d.totalReviews === 0}
+            emptyTitle="No reviews in this period"
+            empty="Choose a longer period above."
+          >
+            {(d) => (
+              <div className={`reviews-summary ${summary.isPlaceholderData ? 'is-dimmed' : ''}`}>
+                <section className="score-card" aria-label="Average rating">
+                  <span className="score-number">{Number(d.averageRating).toFixed(1)}</span>
+                  <Stars value={d.averageRating} size="lg" />
+                  <span className="score-caption">
+                    {formatInt(d.totalReviews)} reviews {PERIOD_TEXT[days]}
+                  </span>
+                  <span className="score-split">
+                    <span className="split-good">{pct(sum(d, (r) => r >= 4), d.totalReviews)}% gave 4 or 5 stars</span>
+                    <span className="split-bad">{pct(sum(d, (r) => r <= 2), d.totalReviews)}% gave 1 or 2 stars</span>
+                  </span>
+                </section>
 
-              <div className="grid-2">
-                <Card title="Rating distribution" subtitle="Click a bar to see only those reviews">
-                  <div className="chart" role="img" aria-label="Number of reviews per star rating">
-                    <ResponsiveContainer width="100%" height={260}>
-                      <BarChart data={d.ratingDistribution} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
-                        <CartesianGrid stroke={chartColors.grid} vertical={false} />
-                        <XAxis dataKey="rating" tickFormatter={(r) => `${r}★`} tick={{ fontSize: 13 }} />
-                        <YAxis allowDecimals={false} width={44} tick={{ fontSize: 12 }} />
-                        <Tooltip
-                          formatter={(value, _n, item) => [`${value} reviews (${item.payload.percent}%)`, `${item.payload.rating} star`]}
-                          labelFormatter={() => ''}
-                          cursor={{ fill: 'rgba(0,0,0,0.04)' }}
-                        />
-                        <Bar
-                          dataKey="count"
-                          radius={[4, 4, 0, 0]}
-                          cursor="pointer"
-                          onClick={(entry) => {
-                            const r = entry?.payload?.rating ?? entry?.rating;
-                            if (r) setRating((cur) => (cur === r ? null : r));
-                          }}
-                        >
-                          {d.ratingDistribution.map((r) => (
-                            <Cell key={r.rating} fill={STAR_COLORS[r.rating]} fillOpacity={rating && rating !== r.rating ? 0.3 : 1} />
-                          ))}
-                          <LabelList dataKey="count" position="top" fontSize={12} />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </Card>
+                <section className="rating-rows" aria-label="Reviews per star rating">
+                  {[...d.ratingDistribution].reverse().map((r) => {
+                    const active = rating === r.rating;
+                    return (
+                      <button
+                        key={r.rating}
+                        type="button"
+                        className={`rating-row ${active ? 'is-active' : ''} ${rating && !active ? 'is-faded' : ''}`}
+                        aria-pressed={active}
+                        onClick={() => setRating(active ? null : r.rating)}
+                        title={active ? 'Show all reviews' : `Show only ${r.rating}-star reviews`}
+                      >
+                        <span className="rating-row-label">{r.rating} ★</span>
+                        <span className="rating-row-bar">
+                          <span className={`bar-fill bar-${r.rating}`} style={{ width: `${maxShare(d, r.count)}%` }} />
+                        </span>
+                        <span className="rating-row-count">{formatInt(r.count)}</span>
+                      </button>
+                    );
+                  })}
+                  <span className="field-hint">Click a row to read only those reviews.</span>
+                </section>
 
-                <Card title="Top skill tags" subtitle="Skills mentioned most in reviews">
+                <Card title="Skills mentioned most" className="tags-card">
                   {d.topTags.length === 0 ? (
-                    <EmptyState title="No tags" />
+                    <EmptyState title="No skills mentioned yet" />
                   ) : (
-                    <div className="chart" role="img" aria-label="Most frequent skill tags">
-                      <ResponsiveContainer width="100%" height={Math.max(220, d.topTags.length * 28)}>
-                        <BarChart data={d.topTags} layout="vertical" margin={{ top: 0, right: 40, left: 8, bottom: 0 }}>
-                          <XAxis type="number" hide />
-                          <YAxis type="category" dataKey="tag" width={110} tick={{ fontSize: 13 }} />
-                          <Tooltip formatter={(v) => [`${v} reviews`, 'Count']} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
-                          <Bar dataKey="count" fill={chartColors.accent} radius={[0, 4, 4, 0]}>
-                            <LabelList dataKey="count" position="right" fontSize={12} />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <ol className="tag-bars">
+                      {d.topTags.map((t) => (
+                        <li key={t.tag}>
+                          <span className="tag-name">{t.tag}</span>
+                          <span className="tag-bar">
+                            <span style={{ width: `${(t.count / d.topTags[0].count) * 100}%` }} />
+                          </span>
+                          <span className="tag-count">{formatInt(t.count)}</span>
+                        </li>
+                      ))}
+                    </ol>
                   )}
                 </Card>
+
+                {!freelancerId && (
+                  <Card title="Top-rated workers" subtitle="Highest average rating, then most reviews" className="top-card">
+                    <ol className="top-workers">
+                      {d.topWorkers.map((w, i) => (
+                        <li key={w.freelancerId} className="top-worker">
+                          <span className="list-rank">{i + 1}</span>
+                          <button type="button" onClick={() => choose(w.freelancerId)}>
+                            {w.name}
+                          </button>
+                          <Stars value={w.avgRating} />
+                          <span className="muted top-worker-score">
+                            {Number(w.avgRating).toFixed(1)} ({formatInt(w.reviewCount)} {w.reviewCount === 1 ? 'review' : 'reviews'})
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  </Card>
+                )}
               </div>
+            )}
+          </QueryState>
 
-              {!freelancerId && (
-                <Card title="Top-rated workers" subtitle="Highest average rating · click a name to see their reviews and portfolio">
-                  <ol className="top-workers">
-                    {d.topWorkers.map((w, i) => (
-                      <li key={w.freelancerId} className="top-worker">
-                        <span className="list-rank">{i + 1}</span>
-                        <button type="button" onClick={() => choose(w.freelancerId)}>
-                          {w.name}
-                        </button>
-                        <Stars value={w.avgRating} />
-                        <span className="muted top-worker-score">
-                          {Number(w.avgRating).toFixed(2)} · {formatInt(w.reviewCount)} reviews
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                </Card>
-              )}
-
-              <details className="explain">
-                <summary>How this works</summary>
-                <p>
-                  <code>$match</code> on <code>created_at</code> (index <code>created_at_1</code>) — plus <code>freelancer_id</code> when
-                  one freelancer is chosen — runs once. <code>$facet</code> then feeds the same documents into four sub-pipelines:{' '}
-                  <code>ratingDistribution</code> (<code>$group</code> by rating), <code>topSkillTags</code> (<code>$unwind</code> the
-                  tag array, <code>$group</code>, <code>$sort</code>, <code>$limit 10</code>), <code>overallAverage</code> (added: the
-                  brief asks for it) and <code>overallWorkerRatings</code>. The result is one document with four arrays. Last
-                  run: {d.queryMs} ms.
-                </p>
-              </details>
-            </div>
-          );
-        }}
-      </QueryState>
-
-      <div className="grid-reviews">
-        <ReviewList freelancerId={freelancerId} rating={rating} onClear={() => setRating(null)} />
-        {freelancerId ? (
-          <PortfolioCard freelancerId={freelancerId} />
-        ) : (
-          <Card title="Portfolio" subtitle="Skills, experience and certifications">
-            <EmptyState title="Pick a freelancer to see their portfolio">Click a name in “Top-rated workers” or use the search above.</EmptyState>
-          </Card>
-        )}
-      </div>
+          <div className="grid-reviews">
+            <ReviewList freelancerId={freelancerId} rating={rating} onClear={() => setRating(null)} />
+            {freelancerId ? (
+              <PortfolioCard freelancerId={freelancerId} />
+            ) : (
+              <Card title="Portfolio">
+                <EmptyState title="Pick a freelancer to see their portfolio">
+                  Click a name under “Top-rated workers”, or search for someone above.
+                </EmptyState>
+              </Card>
+            )}
+          </div>
+        </>
+      )}
     </>
   );
 }
+
+const sum = (d, keep) => d.ratingDistribution.filter((r) => keep(r.rating)).reduce((s, r) => s + r.count, 0);
+const maxShare = (d, count) => {
+  const max = Math.max(...d.ratingDistribution.map((r) => r.count), 1);
+  return (count / max) * 100;
+};
 
 function ReviewList({ freelancerId, rating, onClear }) {
   const [page, setPage] = useState(1);
@@ -232,48 +223,55 @@ function ReviewList({ freelancerId, rating, onClear }) {
 
   return (
     <Card
-      title="Reviews"
-      subtitle="Newest first, all time"
+      title={rating ? `${rating}-star reviews` : 'Latest reviews'}
+      subtitle="Newest first, from all time"
       actions={
         rating && (
           <Button variant="ghost" size="sm" onClick={onClear}>
-            {rating}★ only · clear
+            Show all ratings
           </Button>
         )
       }
     >
-      <QueryState query={q} isEmpty={(d) => d.items.length === 0} emptyTitle={rating ? `No ${rating}-star reviews` : 'No reviews'}>
-        {(d) => (
-          <>
-            <ul className={`review-list ${q.isPlaceholderData ? 'is-dimmed' : ''}`}>
-              {d.items.map((r) => (
-                <li key={r.id} className="review">
-                  <div className="review-head">
-                    <Stars value={r.rating} />
-                    <span className="muted">{formatDateTime(r.createdAt)}</span>
-                  </div>
-                  <p>
-                    “{r.comment}” <span className="muted">— {r.clientName}</span>
-                  </p>
-                  {!freelancerId && (
-                    <span className="muted">
-                      for <Link to={`/freelancers/${r.freelancerId}`}>{r.freelancerName}</Link>
-                    </span>
-                  )}
-                  <div className="chip-row">
+      {q.isPending && <Loading />}
+      {q.isError && <ErrorState error={q.error} onRetry={() => q.refetch()} />}
+      {q.data && q.data.items.length === 0 && (
+        <EmptyState title={rating ? `No ${rating}-star reviews` : 'No reviews yet'} />
+      )}
+      {q.data && q.data.items.length > 0 && (
+        <>
+          <ul className={`review-list ${q.isPlaceholderData ? 'is-dimmed' : ''}`}>
+            {q.data.items.map((r) => (
+              <li key={r.id} className="review">
+                <div className="review-head">
+                  <Stars value={r.rating} />
+                  <span className="muted">{formatDay(r.createdAt)}</span>
+                </div>
+                <p className="review-text">“{r.comment}”</p>
+                <div className="review-meta">
+                  <span className="muted">
+                    {r.clientName}
+                    {!freelancerId && (
+                      <>
+                        {' '}
+                        reviewed <Link to={`/reviews?freelancer=${r.freelancerId}`}>{r.freelancerName}</Link>
+                      </>
+                    )}
+                  </span>
+                  <span className="review-tags">
                     {r.tags.map((t) => (
-                      <Badge key={t} tone="neutral">
+                      <span key={t} className="review-tag">
                         {t}
-                      </Badge>
+                      </span>
                     ))}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <Pagination page={d.page} totalPages={d.totalPages} total={d.total} isFetching={q.isFetching} onPage={setPage} />
-          </>
-        )}
-      </QueryState>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <Pagination page={q.data.page} totalPages={q.data.totalPages} total={q.data.total} isFetching={q.isFetching} onPage={setPage} />
+        </>
+      )}
     </Card>
   );
 }
