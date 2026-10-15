@@ -11,26 +11,41 @@ The app uses PostgreSQL for clients, freelancers, contracts, escrow and revenue,
 | `db/` | Inherited Part A database work and one additive UI support script. Its `sql/`, `mongo/` and `data_generation/` subfolders contain the database scripts and seeders. |
 | `api/` | Express API connecting the frontend to both databases. |
 | `web/` | React and Vite frontend, with screen and component tests. |
-| `docs/` | Requirements, endpoint reference, design work, handover note and contribution record. |
+| `docs/` | Requirements, endpoint reference, design work and handover note. |
 | `scripts/` | Database setup scripts and a Windows app startup script. |
 
 The original database setup instructions are in [`db/README.md`](db/README.md). Run its relative commands from the `db/` directory. `db/sql/07_ui_support.sql` is an additive table for recording materialized-view refresh times in the UI; files `01`–`06` are inherited from the original project.
 
-## Assumptions and technology choices
+## Assumptions
 
-- This is a seeded demonstration app. The header's client picker chooses who is acting; it does not authenticate users.
-- A complete demo needs both databases. PostgreSQL holds balances and contracts; MongoDB holds portfolios, reviews and recent worker locations.
-- Worker location pings expire after two hours, so the Workers map can add fresh pings during a demo.
-- The inherited Part A scripts remain under `db/`. The additional `db/sql/07_ui_support.sql` records when the lifetime earnings summary was last updated.
+1. **Currency is ₹**, since freelancer locations are in Delhi NCR.
+2. **There is no real login.** The demo user is a **client**, chosen with the *Acting as client* picker in the header, because clients fund gigs and own the escrow.
+3. **"Active gig" means `IN_PROGRESS`**, as in the inherited index `idx_active_gig`. A freelancer can have several funded contracts waiting, but only one in progress.
+4. **Contract statuses only move forward**: FUNDED → IN_PROGRESS → COMPLETED. The API enforces this.
+5. **Revenue is the budget of COMPLETED contracts, dated by `created_at`**, as in the inherited analytics query (there is no completion-date column).
+6. **The 7-day moving average keeps the inherited definition**: it averages only the days that had revenue in the 7-day window.
+7. **Job sites** are preset points in the seeded area, or any point clicked on the map, because the database has no job-site table. The search radius is 5 km.
+8. **The map shows one row per worker** (their latest available location within 5 km). A worker is **busy** if they have an IN_PROGRESS contract.
+9. **"Add fresh pings" and "Simulate workers moving" insert location pings** in the same format as the seeder. They stand in for workers' phones sending their location, because seeded pings expire after two hours.
+10. **Amounts** have at most 2 decimal places and are at most ₹99,999,999.99, matching the `DECIMAL(10,2)` columns.
+11. **Dates use Indian time** (Asia/Kolkata), set on the database container.
+12. **Older escrow history may not add up.** The inherited seeder wrote random balances into the audit rows, so the Escrow screen calculates balances back from each client's current balance. Every transaction made in this app is recorded by the trigger and adds up exactly.
+13. **The inherited Part A scripts are unchanged** under `db/`. The only addition is `db/sql/07_ui_support.sql`, which records when the lifetime earnings summary was last updated.
 
-| Technology | Reason for using it |
-| --- | --- |
-| PostgreSQL 16 | Keeps escrow funding and contract changes transactional; also supplies revenue analytics. |
-| MongoDB | Stores flexible portfolios and reviews, and supports nearby-worker searches. |
-| Node.js and Express | Provides one API between the browser and both databases. |
-| React and Vite | Builds the web screens and supports local development. |
-| Python | Seeds the inherited demonstration data. |
-| Docker Compose (optional) | Runs both databases with known ports for a repeatable setup. |
+## Technology choices
+
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Databases | **PostgreSQL 16**, **MongoDB 8** | The inherited databases: PostgreSQL keeps escrow funding and contract changes transactional and supplies revenue analytics; MongoDB stores flexible portfolios and reviews and supports nearby-worker searches. |
+| API | **Node.js + Express**, `pg`, `mongodb` | One API between the browser and both databases; official drivers; the API stays a thin layer and lets the database do the work (`fund_gig`, the audit trigger, the window query, `$geoNear`, `$facet`). |
+| Front end | **React 18 + Vite** | Reusable components across seven screens; fast reload; Vite forwards `/api` to the API, so no CORS setup. |
+| Data fetching | **TanStack Query** | Loading, error and empty states, caching, no flicker while paging, and polling for the live map. |
+| Routing | **React Router** | Screen state lives in the URL, so links and back/forward work. |
+| Charts | **Recharts** | Simple bar and line charts for analytics. |
+| Map | **Leaflet** with free tile services | No API key needed. |
+| Tests | **node:test** (API), **Vitest + Testing Library** (web) | No extra test tools for the API; screens are tested the way a user uses them. |
+| Seeding | **Python** | Runs the inherited seeders. |
+| Setup | **Docker Compose** (optional) | Runs both databases with known ports for a repeatable setup. |
 
 ## Requirements and setup
 
@@ -90,6 +105,16 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173). The API runs on `http://localhost:4000`; Vite forwards `/api` requests to it. On Windows with Docker, [`scripts/start.ps1`](scripts/start.ps1) can start both app processes after setup. `GET /api/health` reports whether both databases are reachable.
 
+### Troubleshooting
+
+| Problem | Fix |
+| --- | --- |
+| Every screen shows "Could not load this" | The API is not running: `cd api && npm start` |
+| Only Workers map and Reviews show an error | MongoDB is down: `docker compose up -d` |
+| Setup says ports 5433 / 27018 are in use | Stop the containers it lists (`docker stop <name>`), then run setup again |
+| Setup says the database already has data | Run setup with `-Reset` / `--reset` |
+| Workers map: "No available workers within 5 km" | Seeded locations expire 2 hours after seeding. Press **Add fresh pings** or turn on **Simulate workers moving**. |
+
 ## Screens and demo flow
 
 | Screen | What to try |
@@ -105,25 +130,23 @@ The app includes loading, empty and error states, and layouts for laptop and pho
 
 ## Screenshots
 
-These screen images are kept in the existing [design screens folder](docs/design/screens/) alongside the [wireframes](docs/design/wireframes.md).
+Screenshots of the running app on the seeded data, in [docs/screenshots/](docs/screenshots/). The screen designs are in [docs/design/wireframes.md](docs/design/wireframes.md).
 
 | Explore | Freelancer profile |
 | --- | --- |
-| ![Explore screen](docs/design/screens/01-explore.png) | ![Freelancer profile screen](docs/design/screens/02-freelancer-detail.png) |
+| ![Explore](docs/screenshots/01-explore.jpg) | ![Freelancer profile](docs/screenshots/02-freelancer-page.jpg) |
 
 | Fund gig | Escrow |
 | --- | --- |
-| ![Fund gig screen](docs/design/screens/03-fund-gig.png) | ![Escrow screen](docs/design/screens/04-escrow.png) |
+| ![Fund gig](docs/screenshots/03-fund-gig.jpg) | ![Escrow](docs/screenshots/04-escrow.jpg) |
 
-| Analytics | Workers map |
+| Analytics | Reviews |
 | --- | --- |
-| ![Analytics screen](docs/design/screens/05-analytics.png) | ![Workers map screen](docs/design/screens/06-workers-map.png) |
+| ![Analytics](docs/screenshots/05-analytics.jpg) | ![Reviews](docs/screenshots/07-reviews.jpg) |
 
-| Reviews | Phone layout |
+| Workers map | Narrow screen layout |
 | --- | --- |
-| ![Reviews screen](docs/design/screens/07-reviews.png) | ![Phone layout](docs/design/screens/08-phone.png) |
-
-Additional images: [design system](docs/design/screens/00-design-system.png) and [loading, empty and error states](docs/design/screens/09-states.png).
+| ![Workers map](docs/screenshots/06-workers-map.jpg) | ![Narrow screen layout](docs/screenshots/08-narrow-layout.jpg) |
 
 ## API, tests and known data behavior
 
@@ -138,17 +161,17 @@ The API also has a database-backed funding integration test (`cd api && npm run 
 
 ## Team contributions
 
-The primary ownership areas below are summarized from the [full contribution record](docs/design/contribution.md). Shared components and integration work are described there.
+Work was divided by screen. Each member owned the design and the code for their screens; shared parts are listed under the member who built them. In [docs/design/wireframes.md](docs/design/wireframes.md), each member is responsible for the sketches and screen designs of their own screens, and the users section was agreed by the whole team.
 
-| Team member | Primary area |
-| --- | --- |
-| Manjeet Singh Seegriwal | Explore, Fund Gig, and database work. |
-| Aniket Anand | Escrow, shared web base, and documentation. |
-| Adwaith Panicker | Analytics and API/backend. |
-| Abhaya Mai Dasari | Workers Map, Reviews, and supporting integration. |
+| Member | Roll no. | Design | Code | Docs / tests |
+| --- | --- | --- | --- | --- |
+| Manjeet Singh Seegriwal | 2026201022 | Explore, Freelancer page, Fund gig | Explore, detail pages, Fund gig; database setup in this repository | Explore and Fund gig tests |
+| Adwaith Panicker | 2026201067 | Analytics; design system (colours, type, components) | Analytics; API and backend | API tests |
+| Dasari Abhaya Manasa | 2026202014 | Workers map, Reviews; phone layout | Workers map, Reviews, MongoDB routes and pipelines; plain-language error messages | Workers map tests, MongoDB guide |
+| Aniket Anand | 2026204019 | Escrow; loading / empty / error states | Escrow; shared web base (layout, components, API client) | Project documentation, handover note |
 
 ## Repository and submission
 
 - GitHub repo link: [https://github.com/MJT444/newGigTaskUI](https://github.com/MJT444/newGigTaskUI)
-- Previously recorded final commit hash: `3f54e92` (update this to the submission commit before handing in).
-- Video link: to be added before submission.
+- Previously recorded final commit hash: `3f54e92`.
+- Demo video: [watch on Google Drive](https://drive.google.com/file/d/1-9lna9s5lECwPm5uzjLuKOdSvk2leRoV/view?usp=drivesdk)
