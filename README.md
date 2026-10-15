@@ -6,20 +6,20 @@ The app uses PostgreSQL for clients, freelancers, contracts, escrow and revenue,
 
 ## Repository structure
 
-| Folder | Contents |
-| --- | --- |
-| `db/` | Inherited Part A database work and one additive UI support script. Its `sql/`, `mongo/` and `data_generation/` subfolders contain the database scripts and seeders. |
-| `api/` | Express API connecting the frontend to both databases. |
-| `web/` | React and Vite frontend, with screen and component tests. |
-| `docs/` | Requirements, endpoint reference, design work and handover note. |
-| `scripts/` | Database setup scripts and a Windows app startup script. |
+| Folder     | Contents                                                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db/`      | Inherited Part A database work and one additive UI support script. Its `sql/`, `mongo/` and `data_generation/` subfolders contain the database scripts and seeders. |
+| `api/`     | Express API connecting the frontend to both databases.                                                                                                              |
+| `web/`     | React and Vite frontend, with screen and component tests.                                                                                                           |
+| `docs/`    | Requirements, endpoint reference, design work and handover note.                                                                                                    |
+| `scripts/` | Database setup scripts and a Windows app startup script.                                                                                                            |
 
 The original database setup instructions are in [`db/README.md`](db/README.md). Run its relative commands from the `db/` directory. `db/sql/07_ui_support.sql` is an additive table for recording materialized-view refresh times in the UI; files `01`–`06` are inherited from the original project.
 
 ## Assumptions
 
 1. **Currency is ₹**, since freelancer locations are in Delhi NCR.
-2. **There is no real login.** The demo user is a **client**, chosen with the *Acting as client* picker in the header, because clients fund gigs and own the escrow.
+2. **There is no real login.** The demo user is a **client**, chosen with the _Acting as client_ picker in the header, because clients fund gigs and own the escrow.
 3. **"Active gig" means `IN_PROGRESS`**, as in the inherited index `idx_active_gig`. A freelancer can have several funded contracts waiting, but only one in progress.
 4. **Contract statuses only move forward**: FUNDED → IN_PROGRESS → COMPLETED. The API enforces this.
 5. **Revenue is the budget of COMPLETED contracts, dated by `created_at`**, as in the inherited analytics query (there is no completion-date column).
@@ -34,18 +34,18 @@ The original database setup instructions are in [`db/README.md`](db/README.md). 
 
 ## Technology choices
 
-| Layer | Choice | Why |
-| --- | --- | --- |
-| Databases | **PostgreSQL 16**, **MongoDB 8** | The inherited databases: PostgreSQL keeps escrow funding and contract changes transactional and supplies revenue analytics; MongoDB stores flexible portfolios and reviews and supports nearby-worker searches. |
-| API | **Node.js + Express**, `pg`, `mongodb` | One API between the browser and both databases; official drivers; the API stays a thin layer and lets the database do the work (`fund_gig`, the audit trigger, the window query, `$geoNear`, `$facet`). |
-| Front end | **React 18 + Vite** | Reusable components across seven screens; fast reload; Vite forwards `/api` to the API, so no CORS setup. |
-| Data fetching | **TanStack Query** | Loading, error and empty states, caching, no flicker while paging, and polling for the live map. |
-| Routing | **React Router** | Screen state lives in the URL, so links and back/forward work. |
-| Charts | **Recharts** | Simple bar and line charts for analytics. |
-| Map | **Leaflet** with free tile services | No API key needed. |
-| Tests | **node:test** (API), **Vitest + Testing Library** (web) | No extra test tools for the API; screens are tested the way a user uses them. |
-| Seeding | **Python** | Runs the inherited seeders. |
-| Setup | **Docker Compose** (optional) | Runs both databases with known ports for a repeatable setup. |
+| Layer         | Choice                                                  | Why                                                                                                                                                                                                             |
+| ------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Databases     | **PostgreSQL 16**, **MongoDB 8**                        | The inherited databases: PostgreSQL keeps escrow funding and contract changes transactional and supplies revenue analytics; MongoDB stores flexible portfolios and reviews and supports nearby-worker searches. |
+| API           | **Node.js + Express**, `pg`, `mongodb`                  | One API between the browser and both databases; official drivers; the API stays a thin layer and lets the database do the work (`fund_gig`, the audit trigger, the window query, `$geoNear`, `$facet`).         |
+| Front end     | **React 18 + Vite**                                     | Reusable components across seven screens; fast reload; Vite forwards `/api` to the API, so no CORS setup.                                                                                                       |
+| Data fetching | **TanStack Query**                                      | Loading, error and empty states, caching, no flicker while paging, and polling for the live map.                                                                                                                |
+| Routing       | **React Router**                                        | Screen state lives in the URL, so links and back/forward work.                                                                                                                                                  |
+| Charts        | **Recharts**                                            | Simple bar and line charts for analytics.                                                                                                                                                                       |
+| Map           | **Leaflet** with free tile services                     | No API key needed.                                                                                                                                                                                              |
+| Tests         | **node:test** (API), **Vitest + Testing Library** (web) | No extra test tools for the API; screens are tested the way a user uses them.                                                                                                                                   |
+| Seeding       | **Python**                                              | Runs the inherited seeders.                                                                                                                                                                                     |
+| Setup         | **Docker Compose** (optional)                           | Runs both databases with known ports for a repeatable setup.                                                                                                                                                    |
 
 ## Requirements and setup
 
@@ -107,24 +107,24 @@ Open [http://localhost:5173](http://localhost:5173). The API runs on `http://loc
 
 ### Troubleshooting
 
-| Problem | Fix |
-| --- | --- |
-| Every screen shows "Could not load this" | The API is not running: `cd api && npm start` |
-| Only Workers map and Reviews show an error | MongoDB is down: `docker compose up -d` |
-| Setup says ports 5433 / 27018 are in use | Stop the containers it lists (`docker stop <name>`), then run setup again |
-| Setup says the database already has data | Run setup with `-Reset` / `--reset` |
+| Problem                                         | Fix                                                                                                              |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Every screen shows "Could not load this"        | The API is not running: `cd api && npm start`                                                                    |
+| Only Workers map and Reviews show an error      | MongoDB is down: `docker compose up -d`                                                                          |
+| Setup says ports 5433 / 27018 are in use        | Stop the containers it lists (`docker stop <name>`), then run setup again                                        |
+| Setup says the database already has data        | Run setup with `-Reset` / `--reset`                                                                              |
 | Workers map: "No available workers within 5 km" | Seeded locations expire 2 hours after seeding. Press **Add fresh pings** or turn on **Simulate workers moving**. |
 
 ## Screens and demo flow
 
-| Screen | What to try |
-| --- | --- |
-| **Explore** | Search and page through clients, freelancers and contracts; open profiles and change a contract's status. |
-| **Fund gig** | Choose a client and freelancer, enter a budget, and see the escrow balance before and after funding. |
-| **Escrow** | Review deposits, deductions and running balances for the selected client. |
-| **Analytics** | View freelancer revenue, the seven-day average, rankings and lifetime earnings; update the lifetime summary. |
-| **Workers map** | Find available workers within 5 km of a job site and see location updates. |
-| **Reviews** | Explore ratings and skill tags; open a freelancer's portfolio from their profile. |
+| Screen          | What to try                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Explore**     | Search and page through clients, freelancers and contracts; open profiles and change a contract's status.    |
+| **Fund gig**    | Choose a client and freelancer, enter a budget, and see the escrow balance before and after funding.         |
+| **Escrow**      | Review deposits, deductions and running balances for the selected client.                                    |
+| **Analytics**   | View freelancer revenue, the seven-day average, rankings and lifetime earnings; update the lifetime summary. |
+| **Workers map** | Find available workers within 5 km of a job site and see location updates.                                   |
+| **Reviews**     | Explore ratings and skill tags; open a freelancer's portfolio from their profile.                            |
 
 The app includes loading, empty and error states, and layouts for laptop and phone screens. The detailed [requirements and persona map](docs/requirements_and_screens.md) and [screen designs](docs/design/wireframes.md) describe each workflow.
 
@@ -132,20 +132,20 @@ The app includes loading, empty and error states, and layouts for laptop and pho
 
 Screenshots of the running app on the seeded data, in [docs/screenshots/](docs/screenshots/). The screen designs are in [docs/design/wireframes.md](docs/design/wireframes.md).
 
-| Explore | Freelancer profile |
-| --- | --- |
+| Explore                                     | Freelancer profile                                             |
+| ------------------------------------------- | -------------------------------------------------------------- |
 | ![Explore](docs/screenshots/01-explore.jpg) | ![Freelancer profile](docs/screenshots/02-freelancer-page.jpg) |
 
-| Fund gig | Escrow |
-| --- | --- |
+| Fund gig                                      | Escrow                                    |
+| --------------------------------------------- | ----------------------------------------- |
 | ![Fund gig](docs/screenshots/03-fund-gig.jpg) | ![Escrow](docs/screenshots/04-escrow.jpg) |
 
-| Analytics | Reviews |
-| --- | --- |
+| Analytics                                       | Reviews                                     |
+| ----------------------------------------------- | ------------------------------------------- |
 | ![Analytics](docs/screenshots/05-analytics.jpg) | ![Reviews](docs/screenshots/07-reviews.jpg) |
 
-| Workers map | Narrow screen layout |
-| --- | --- |
+| Workers map                                         | Narrow screen layout                                           |
+| --------------------------------------------------- | -------------------------------------------------------------- |
 | ![Workers map](docs/screenshots/06-workers-map.jpg) | ![Narrow screen layout](docs/screenshots/08-narrow-layout.jpg) |
 
 ## API, tests and known data behavior
@@ -163,15 +163,15 @@ The API also has a database-backed funding integration test (`cd api && npm run 
 
 Work was divided by screen. Each member owned the design and the code for their screens; shared parts are listed under the member who built them. In [docs/design/wireframes.md](docs/design/wireframes.md), each member is responsible for the sketches and screen designs of their own screens, and the users section was agreed by the whole team.
 
-| Member | Roll no. | Design | Code | Docs / tests |
-| --- | --- | --- | --- | --- |
-| Manjeet Singh Seegriwal | 2026201022 | Explore, Freelancer page, Fund gig | Explore, detail pages, Fund gig; database setup in this repository | Explore and Fund gig tests |
-| Adwaith Panicker | 2026201067 | Analytics; design system (colours, type, components) | Analytics; API and backend | API tests |
-| Dasari Abhaya Manasa | 2026202014 | Workers map, Reviews; phone layout | Workers map, Reviews, MongoDB routes and pipelines; plain-language error messages | Workers map tests, MongoDB guide |
-| Aniket Anand | 2026204019 | Escrow; loading / empty / error states | Escrow; shared web base (layout, components, API client) | Project documentation, handover note |
+| Member                  | Roll no.   | Design                                               | Code                                                                              | Docs / tests                         |
+| ----------------------- | ---------- | ---------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------ |
+| Manjeet Singh Seegriwal | 2026201022 | Explore, Freelancer page, Fund gig                   | Explore, detail pages, Fund gig; database setup in this repository                | Explore and Fund gig tests           |
+| Adwaith Panicker        | 2026201067 | Analytics; design system (colours, type, components) | Analytics; API and backend                                                        | API tests                            |
+| Dasari Abhaya Manasa    | 2026202014 | Workers map, Reviews; phone layout                   | Workers map, Reviews, MongoDB routes and pipelines; plain-language error messages | Workers map tests, MongoDB guide     |
+| Aniket Anand            | 2026204019 | Escrow; loading / empty / error states               | Escrow; shared web base (layout, components, API client)                          | Project documentation, handover note |
 
 ## Repository and submission
 
 - GitHub repo link: [https://github.com/MJT444/newGigTaskUI](https://github.com/MJT444/newGigTaskUI)
-- Previously recorded final commit hash: `3f54e92`.
+- Previously recorded final commit hash: `ec710ef`.
 - Demo video: [watch on Google Drive](https://drive.google.com/file/d/1-9lna9s5lECwPm5uzjLuKOdSvk2leRoV/view?usp=drivesdk)
