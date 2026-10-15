@@ -64,11 +64,6 @@ export function Layout() {
         <Outlet />
       </main>
 
-      <footer className="footer">GigTask</footer>
     </div>
   );
 }
-/* ==========================================
-   GigTask UI Refresh
-   Modern dashboard styling
-   ========================================== */

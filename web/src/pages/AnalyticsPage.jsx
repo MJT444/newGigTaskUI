@@ -34,7 +34,7 @@ export function AnalyticsPage() {
     <>
       <PageHeader
         title="Freelancer revenue"
-        description="COMPLETED contracts only. Chart and ranking use the Part A window query (db/sql/06); the summary comes from the materialized view."
+        description="Revenue from completed contracts. Click a ranking row for the chart."
       />
       <SummaryPanel />
       <div className="grid-analytics">
@@ -55,15 +55,15 @@ function SummaryPanel() {
 
   return (
     <Card
-      title="Lifetime summary (freelancer_lifetime_stats)"
+      title="Lifetime summary"
       subtitle={
         q.data?.lastRefresh
-          ? `Last refreshed ${formatDateTime(q.data.lastRefresh.finished_at)} · ${q.data.lastRefresh.refresh_mode.toLowerCase()} refresh`
-          : 'Not refreshed from this app yet — refresh time unknown'
+          ? `Last updated ${formatDateTime(q.data.lastRefresh.finished_at)}`
+          : 'Not updated from this app yet'
       }
       actions={
         <Button loading={refresh.isPending} onClick={() => refresh.mutate()}>
-          Refresh materialized view
+          Update summary
         </Button>
       }
     >
@@ -71,7 +71,7 @@ function SummaryPanel() {
       <QueryState query={q}>
         {(d) =>
           !d.isPopulated ? (
-            <EmptyState title="The materialized view has no data yet">Press “Refresh materialized view”.</EmptyState>
+            <EmptyState title="The summary has no data yet">Press “Update summary”.</EmptyState>
           ) : (
             <>
               <div className="stats-grid">
@@ -81,20 +81,20 @@ function SummaryPanel() {
                 <StatCard label="Average per earner" value={<Money value={d.totals.avg_earnings} />} hint={`max ${formatMoney(d.totals.max_earnings)}`} />
               </div>
               {d.pendingCompleted > 0 ? (
-                <Alert tone="warning" title="The view is out of date">
-                  {formatInt(d.pendingCompleted)} completed contract(s) are not in the view yet. A materialized view is a stored
-                  snapshot; refresh it to include them.
+                <Alert tone="warning" title="The summary is out of date">
+                  {formatInt(d.pendingCompleted)} {Number(d.pendingCompleted) === 1 ? 'contract was' : 'contracts were'} completed after the last
+                  update. Press “Update summary” to include them.
                 </Alert>
               ) : (
-                <p className="muted">The view includes every completed contract.</p>
+                <p className="muted">The summary includes every completed contract.</p>
               )}
               {d.topEarners.length > 0 && (
                 <div className="top-list">
-                  <span className="stat-label">Top lifetime earners in the view</span>
+                  <span className="stat-label">Top lifetime earners</span>
                   <ol>
                     {d.topEarners.map((r) => (
                       <li key={r.freelancer_id}>
-                        {r.freelancer_name} <span className="muted">· {formatMoney(r.total_earnings)} · {formatInt(r.completed_contracts)} contracts</span>
+                        {r.freelancer_name} <span className="muted">· {formatMoney(r.total_earnings)} · {formatInt(r.completed_contracts)} {Number(r.completed_contracts) === 1 ? 'contract' : 'contracts'}</span>
                       </li>
                     ))}
                   </ol>
@@ -129,7 +129,7 @@ function MovingAverageChart({ freelancerId, onSelect }) {
 
   return (
     <Card
-      title="7-day moving average revenue"
+      title="Daily revenue and 7-day average"
       subtitle={f ? `${f.name}${q.data.rank ? ` · rank ${q.data.rank}` : ''} · ${formatMoney(q.data.periodRevenue)} in the period` : 'Choose a freelancer'}
       actions={
         <>
@@ -142,7 +142,7 @@ function MovingAverageChart({ freelancerId, onSelect }) {
         query={q}
         isEmpty={(d) => d.points.every((p) => Number(p.dailyRevenue) === 0)}
         emptyTitle="No completed revenue in this period"
-        empty="This freelancer has no COMPLETED contracts in the period. Try a longer period or pick a freelancer from the ranking."
+        empty="This freelancer has no completed contracts in this period. Try a longer period or pick a freelancer from the ranking."
       >
         {() => (
           <div className={`chart ${q.isPlaceholderData ? 'is-dimmed' : ''}`} role="img" aria-label="Daily revenue bars with a 7-day moving average line">
@@ -161,13 +161,11 @@ function MovingAverageChart({ freelancerId, onSelect }) {
         )}
       </QueryState>
       <details className="explain">
-        <summary>How this is computed</summary>
+        <summary>How the 7-day average works</summary>
         <p>
-          The inherited CTEs: <code>daily_revenue</code> (SUM of COMPLETED budgets per freelancer per day), then{' '}
-          <code>AVG(daily_total) OVER (PARTITION BY freelancer_id ORDER BY revenue_date RANGE BETWEEN INTERVAL '6 days' PRECEDING AND CURRENT ROW)</code>.
-          <code>RANGE</code> looks back 6 calendar days but averages only the days that <em>had</em> revenue, so an isolated day’s
-          “7-day average” equals that day’s revenue. Bars show every calendar day; the line has a point only on revenue days. This
-          behaviour is kept as inherited and discussed in the handover note.
+          For each day with revenue, the line shows the average daily revenue over that day and the 6 days before it, counting
+          only the days that had revenue. So a single busy day on its own has an average equal to that day’s revenue. The bars
+          show every day; the line has a point only on days with revenue.
         </p>
       </details>
     </Card>
@@ -175,7 +173,7 @@ function MovingAverageChart({ freelancerId, onSelect }) {
 }
 
 const RANK_PERIODS = [
-  { value: '30', label: '30 days (Part A)' },
+  { value: '30', label: '30 days' },
   { value: '60', label: '60 days' },
   { value: '90', label: '90 days' },
 ];
@@ -192,8 +190,8 @@ function RankingCard({ selectedId, onSelect }) {
 
   return (
     <Card
-      title="Ranking (DENSE_RANK)"
-      subtitle="db/sql/06_window_analytics.sql: top 50 freelancer-days by 7-day moving average · click a row for the chart"
+      title="Best earning days"
+      subtitle="The 50 highest 7-day averages. Click a row to see their chart."
       actions={
         <Tabs
           label="Ranking period"

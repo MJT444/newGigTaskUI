@@ -1,25 +1,58 @@
-// Workflow 3 (MongoDB): available workers within 5 km of a job site.
+// Workflow 3 (MongoDB): who can reach the job site fastest?
 //
 // Data flow
 //   1. Origin = a preset job site, or a point clicked on the map (kept in the URL).
-//   2. GET /api/workers/nearby runs $geoNear on WorkerLocations; names and
+//   2. GET /api/workers/nearby runs $geoNear on WorkerLocations (5 km); names and
 //      "busy" come from PostgreSQL by freelancer_id.
-//   3. React Query re-runs it every 5 s while Live is on (polling), keeping the
+//   3. React Query re-runs it every 5 s (polling), keeping the
 //      previous result on screen meanwhile - no flicker, no page reload.
-//   4. Ping ids not in the previous poll are "new" and pulse.
+//   4. Ping ids not in the previous update are "new": they pop on the map and
+//      flash in the list.
 //   5. "Add fresh pings" inserts pings, because all seeded pings share one
 //      created_at and the 2-hour TTL index deletes them together.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, qs } from '../api/client.js';
-import { AGE_BUCKETS, colorForAge, WorkerMap } from '../components/mongo/WorkerMap.jsx';
+import { AGE_BUCKETS, colorForAge, MAP_STYLES, WorkerMap } from '../components/mongo/WorkerMap.jsx';
 import { EmptyState, ErrorState, Loading } from '../components/StateViews.jsx';
-import { Alert, Badge, Button, Card, Field, PageHeader, StatCard, Tabs } from '../components/ui.jsx';
-import { formatAge, formatDateTime, formatInt } from '../lib/format.js';
+import { Alert, Button, Card, Field, PageHeader } from '../components/ui.jsx';
+import { formatAge } from '../lib/format.js';
 
 const POLL_MS = 5_000;
 const AUTO_SIM_MS = 10_000;
+const SCOOTER_KMH = 18; // typical city speed on a two-wheeler, used for the travel estimate
+
+const BANDS = [
+  { maxKm: 1, label: 'Within 1 km' },
+  { maxKm: 3, label: '1 to 3 km' },
+  { maxKm: Infinity, label: '3 to 5 km' },
+];
+
+/** Errors caused by the address (bad job site or point), not by the service. */
+const BAD_ORIGIN = new Set(['UNKNOWN_JOB_SITE', 'ORIGIN_REQUIRED', 'INVALID_NUMBER']);
+
+/** The chosen map look, remembered in this browser (storage can be unavailable). */
+function useMapLook() {
+  const KEY = 'gigtask.mapLook';
+  const [look, setLook] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem(KEY);
+      return MAP_STYLES.some((s) => s.id === saved) ? saved : 'night';
+    } catch {
+      return 'night';
+    }
+  });
+  const choose = (next) => {
+    setLook(next);
+    try {
+      window.localStorage.setItem(KEY, next);
+    } catch {
+      /* not remembered, still applied */
+    }
+  };
+  return [look, choose];
+}
 
 function useNow(ms) {
   const [now, setNow] = useState(Date.now());
@@ -28,6 +61,28 @@ function useNow(ms) {
     return () => clearInterval(t);
   }, [ms]);
   return now;
+}
+
+const initials = (name) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join('');
+
+const travelMinutes = (km) => Math.max(1, Math.round((km / SCOOTER_KMH) * 60));
+
+function Avatar({ name, age, busy, size = 'md' }) {
+  return (
+    <span
+      className={`avatar avatar-${size} ${busy ? 'avatar-busy' : ''}`}
+      style={{ background: colorForAge(age) }}
+      aria-hidden="true"
+    >
+      {initials(name)}
+    </span>
+  );
 }
 
 export function WorkersMapPage() {
@@ -39,29 +94,33 @@ export function WorkersMapPage() {
   const pointLat = params.get('lat');
   const pointLng = params.get('lng');
   const originQuery = jobSite ? { jobSite } : { lat: pointLat, lng: pointLng };
+  const resetOrigin = () => setParams({}, { replace: true });
 
   const sites = useQuery({ queryKey: ['workers', 'job-sites'], queryFn: () => api.get('/api/workers/job-sites'), staleTime: Infinity });
 
   // ---- options
-  const [mode, setMode] = useState('workers');
   const [maxAge, setMaxAge] = useState('');
-  const [live, setLive] = useState(true);
   const [autoSim, setAutoSim] = useState(false);
   const [highlightId, setHighlightId] = useState(null);
+  const [focus, setFocus] = useState(null);
+  const [fitKey, setFitKey] = useState(0);
+  const [look, setLook] = useMapLook();
+  const showWholeArea = () => {
+    setFocus(null);
+    setHighlightId(null);
+    setFitKey((k) => k + 1);
+  };
 
   const nearby = useQuery({
-    queryKey: ['workers', 'nearby', originQuery, mode, maxAge],
-    queryFn: () => api.get(`/api/workers/nearby${qs({ ...originQuery, mode, maxAgeMinutes: mode === 'workers' ? maxAge : '' })}`),
-    refetchInterval: live ? POLL_MS : false,
+    queryKey: ['workers', 'nearby', originQuery, maxAge],
+    // mode=workers: one row per worker (latest location). The API's mode=pings
+    // (Part A's raw nearest-5 pipeline) is not shown in the UI.
+    queryFn: () => api.get(`/api/workers/nearby${qs({ ...originQuery, mode: 'workers', maxAgeMinutes: maxAge })}`),
+    refetchInterval: (q) => (BAD_ORIGIN.has(q.state.error?.code) ? false : POLL_MS),
     refetchIntervalInBackground: false,
     placeholderData: keepPreviousData,
   });
-
-  const stats = useQuery({
-    queryKey: ['workers', 'stats'],
-    queryFn: () => api.get('/api/workers/stats'),
-    refetchInterval: live ? 30_000 : false,
-  });
+  const badOrigin = nearby.isError && BAD_ORIGIN.has(nearby.error?.code);
 
   const simulate = useMutation({
     mutationFn: () => api.post('/api/workers/pings/simulate', { ...originQuery, count: 8 }),
@@ -73,15 +132,16 @@ export function WorkersMapPage() {
   simulateRef.current = simulate.mutate;
   const originKey = JSON.stringify(originQuery);
   useEffect(() => {
-    if (!autoSim) return undefined;
+    if (!autoSim || badOrigin) return undefined;
+    simulateRef.current(); // first batch right away, so ticking the box visibly does something
     const t = setInterval(() => simulateRef.current(), AUTO_SIM_MS);
     return () => clearInterval(t);
-  }, [autoSim, originKey]);
+  }, [autoSim, originKey, badOrigin]);
 
-  // ---- "new since the previous poll" (reset when origin/mode change)
+  // ---- "new since the previous update" (reset when the origin or filter changes)
   const prev = useRef({ key: null, ids: new Set() });
-  const resultKey = JSON.stringify([originQuery, mode, maxAge]);
-  const results = nearby.data?.results;
+  const resultKey = JSON.stringify([originQuery, maxAge]);
+  const results = badOrigin ? undefined : nearby.data?.results;
   const newIds = useMemo(() => {
     if (!results || prev.current.key !== resultKey) return new Set();
     return new Set(results.filter((r) => !prev.current.ids.has(r.pingId)).map((r) => r.pingId));
@@ -90,20 +150,27 @@ export function WorkersMapPage() {
     if (results && !nearby.isPlaceholderData) prev.current = { key: resultKey, ids: new Set(results.map((r) => r.pingId)) };
   }, [results, resultKey, nearby.isPlaceholderData]);
 
-  // ---- ages keep counting between polls
+  // ---- ages keep counting between updates
   const now = useNow(1000);
   const sinceFetch = nearby.data ? Math.max(0, (now - Date.parse(nearby.data.generatedAt)) / 1000) : 0;
   const rows = (results || []).map((r) => ({ ...r, age: r.ageSeconds + sinceFetch }));
-  const origin = nearby.data?.origin;
+  const origin = badOrigin ? null : nearby.data?.origin;
+  // Spotlight the nearest worker who is free to start; if everyone nearby is on
+  // a gig, the nearest one overall (and say so).
+  const nearest = rows.find((r) => !r.busy) ?? rows[0];
+  const bands = BANDS.map((b, i) => ({
+    ...b,
+    rows: rows.filter((r) => r.distanceKm <= b.maxKm && (i === 0 || r.distanceKm > BANDS[i - 1].maxKm)),
+  })).filter((b) => b.rows.length > 0);
 
   return (
     <>
       <PageHeader
-        title="Workers near a job site"
-        description="Available workers within 5 km of the job site, nearest first. The map updates on its own as workers send their location."
+        title={origin ? `Workers near ${origin.jobSite ? origin.label : 'your pinned point'}` : 'Workers near a job site'}
+        description="Available workers within 5 km, nearest first. The map updates by itself as workers send their location."
       />
 
-      <Card>
+      <Card className="dispatch-controls">
         <div className="toolbar">
           <Field label="Job site" htmlFor="workers-site">
             <select
@@ -112,7 +179,7 @@ export function WorkersMapPage() {
               value={jobSite}
               onChange={(e) => setParams(e.target.value ? { site: e.target.value } : {}, { replace: true })}
             >
-              {!jobSite && <option value="">Custom point (clicked on map)</option>}
+              {!jobSite && <option value="">Pinned on the map</option>}
               {sites.data?.items.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -120,166 +187,167 @@ export function WorkersMapPage() {
               ))}
             </select>
           </Field>
-          <Field label="Show">
-            <Tabs
-              label="Result type"
-              value={mode}
-              onChange={setMode}
-              tabs={[
-                { value: 'workers', label: 'Workers' },
-                { value: 'pings', label: 'Latest pings (5 nearest)' },
-              ]}
-            />
-          </Field>
-          <Field label="Ping age" htmlFor="workers-age">
-            <select id="workers-age" className="input" value={maxAge} onChange={(e) => setMaxAge(e.target.value)} disabled={mode === 'pings'}>
-              <option value="">Any (last 2 hours)</option>
+          <Field label="Last seen" htmlFor="workers-age">
+            <select id="workers-age" className="input" value={maxAge} onChange={(e) => setMaxAge(e.target.value)}>
+              <option value="">Any time (last 2 hours)</option>
               <option value="15">Last 15 minutes</option>
               <option value="60">Last hour</option>
             </select>
           </Field>
-          <div className="toolbar-actions">
-            <label className="switch">
-              <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
-              <span>Live (poll every {POLL_MS / 1000} s)</span>
-            </label>
+          {/* Stand-ins for workers' phones: seeded locations expire after 2 hours. */}
+          <div className="sim-controls">
             <label className="switch">
               <input type="checkbox" checked={autoSim} onChange={(e) => setAutoSim(e.target.checked)} />
-              <span>Auto-add pings every {AUTO_SIM_MS / 1000} s</span>
+              <span>Simulate workers moving</span>
             </label>
-            <Button variant="secondary" loading={simulate.isPending} onClick={() => simulate.mutate()}>
+            <Button variant="secondary" loading={simulate.isPending} onClick={() => simulate.mutate()} disabled={badOrigin}>
               Add fresh pings
             </Button>
           </div>
         </div>
-        <p className="field-hint">Tip: click anywhere on the map to search around that point.</p>
+        <p className="field-hint">Click anywhere on the map to search around that point instead.</p>
         {simulate.isError && <Alert tone="danger">{simulate.error.message}</Alert>}
       </Card>
 
       {nearby.isPending && <Loading label="Finding nearby workers…" />}
-      {nearby.isError && !nearby.data && <ErrorState error={nearby.error} onRetry={() => nearby.refetch()} />}
 
-      {nearby.data && origin && (
+      {badOrigin && (
+        <ErrorState title="We couldn’t find that location" error={nearby.error}>
+          <Button size="sm" onClick={resetOrigin}>
+            Go to the default job site
+          </Button>
+        </ErrorState>
+      )}
+
+      {nearby.isError && !badOrigin && !nearby.data && <ErrorState error={nearby.error} onRetry={() => nearby.refetch()} />}
+
+      {origin && (
         <>
           {nearby.isError && (
-            <Alert tone="warning" title="Last update failed — showing the previous result">
-              {nearby.error.message}
+            <Alert tone="warning" title="Live update paused">
+              The last update did not arrive, so you are seeing the previous result. It will retry on its own.
             </Alert>
           )}
-          <div className="live-bar" aria-live="polite">
-            <span className={`live-dot ${live ? 'is-live' : ''}`} aria-hidden="true" />
-            {live ? 'Live' : 'Paused'} · updated {formatAge(sinceFetch)} · {rows.length} {mode === 'workers' ? 'workers' : 'pings'}
-            {newIds.size > 0 && <Badge tone="success">{newIds.size} new</Badge>}
-            {nearby.isFetching && <span className="spinner spinner-inline" aria-label="Updating" />}
-          </div>
 
-          <div className="map-layout">
-            <div className="map-panel">
+          <div className="dispatch">
+            <div className="dispatch-map">
               <WorkerMap
                 origin={origin}
                 results={rows}
                 newIds={newIds}
                 highlightId={highlightId}
                 onHighlight={setHighlightId}
+                focus={focus}
+                fitKey={fitKey}
+                look={look}
                 onPick={({ lat, lng }) => setParams({ lat: lat.toFixed(5), lng: lng.toFixed(5) }, { replace: true })}
               />
-              <div className="map-legend" aria-label="Legend">
-                <span>
-                  <i className="legend-dot legend-origin" /> Job site
-                </span>
+              <div className="map-looks" role="group" aria-label="Map style">
+                {MAP_STYLES.map((s) => (
+                  <button key={s.id} type="button" aria-pressed={look === s.id} onClick={() => setLook(s.id)}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <div className="map-key" aria-label="Map key">
                 {AGE_BUCKETS.map((b) => (
                   <span key={b.label}>
-                    <i className="legend-dot" style={{ background: b.color }} /> {b.label}
+                    <i className="key-dot" style={{ background: b.dot, color: b.dot }} /> {b.label}
                   </span>
                 ))}
                 <span>
-                  <i className="legend-dot" style={{ background: '#fff', boxShadow: '0 0 0 2px #b45309' }} /> Gig in progress
-                </span>
-                <span>
-                  <i className="legend-ring" /> 5 km radius
+                  <i className="key-dot key-busy" /> On a gig
                 </span>
               </div>
             </div>
 
-            <Card title="Nearest first" subtitle={`${origin.label} · ${origin.lat.toFixed(4)}, ${origin.lng.toFixed(4)}`} className="results-card">
-              {rows.length === 0 ? (
+            <aside className="dispatch-panel" aria-label="Nearest workers">
+              <div className="live-bar" aria-live="polite">
+                <span className="live-dot is-live" aria-hidden="true" />
+                <span>Live, updated {formatAge(sinceFetch)}</span>
+                {newIds.size > 0 && <span className="new-chip">{newIds.size} new</span>}
+                {nearby.isFetching && <span className="spinner spinner-inline" aria-label="Updating" />}
+                {focus && (
+                  <button type="button" className="link-button" onClick={showWholeArea}>
+                    Show the whole 5 km area
+                  </button>
+                )}
+              </div>
+
+              {nearest ? (
+                <div className="spotlight">
+                  <Avatar name={nearest.name} age={nearest.age} busy={nearest.busy} size="lg" />
+                  <div className="spotlight-body">
+                    <span className="spotlight-kicker">
+                      {nearest.busy ? 'Nearest worker (everyone close by is on a gig)' : 'Nearest worker free to start'}
+                    </span>
+                    <strong className="spotlight-name">{nearest.name}</strong>
+                    <span className="spotlight-distance">
+                      {nearest.distanceKm.toFixed(2)} km
+                      <span title={`Estimate at ${SCOOTER_KMH} km/h, the usual city speed on a scooter`}>
+                        about {travelMinutes(nearest.distanceKm)} min by scooter
+                      </span>
+                    </span>
+                    <span className="muted">Seen {formatAge(nearest.age)}</span>
+                    <Link className="btn btn-primary btn-sm" to={`/freelancers/${nearest.freelancerId}`}>
+                      View profile
+                    </Link>
+                  </div>
+                </div>
+              ) : (
                 <EmptyState title="No available workers within 5 km">
                   Locations older than 2 hours are removed automatically. Press “Add fresh pings” to simulate workers sending
-                  their location, or turn on auto-add.
+                  their location, or turn on “Simulate workers moving”.
                 </EmptyState>
-              ) : (
-                <ol className="worker-list">
-                  {rows.map((r, i) => (
-                    <li
-                      key={r.pingId}
-                      className={`worker-item ${r.pingId === highlightId ? 'is-highlighted' : ''} ${newIds.has(r.pingId) ? 'is-new' : ''}`}
-                      onMouseEnter={() => setHighlightId(r.pingId)}
-                      onMouseLeave={() => setHighlightId(null)}
-                    >
-                      <span className="list-rank">{i + 1}</span>
-                      <span className="legend-dot" style={{ background: colorForAge(r.age) }} aria-hidden="true" />
-                      <span className="worker-main">
-                        <Link to={`/freelancers/${r.freelancerId}`}>{r.name}</Link>
-                        <span className="muted">
-                          {formatAge(r.age)}
-                          {mode === 'workers' && r.pingsInRadius > 1 && ` · ${r.pingsInRadius} pings here`}
-                          {r.busy && ' · gig in progress'}
-                        </span>
-                      </span>
-                      <span className="worker-distance">{r.distanceKm.toFixed(2)} km</span>
-                    </li>
-                  ))}
-                </ol>
               )}
-            </Card>
+
+              {bands.map((band) => (
+                <section key={band.label} className="band">
+                  <h3 className="band-title">
+                    {band.label}
+                    <span className="band-count">
+                      {band.rows.length} {band.rows.length === 1 ? 'worker' : 'workers'}
+                    </span>
+                  </h3>
+                  <ol className="worker-list">
+                    {band.rows.map((r) => (
+                      <li
+                        key={r.pingId}
+                        className={`worker-item ${r.pingId === highlightId ? 'is-highlighted' : ''} ${newIds.has(r.pingId) ? 'is-new' : ''}`}
+                        onMouseEnter={() => setHighlightId(r.pingId)}
+                        onMouseLeave={() => !focus && setHighlightId(null)}
+                      >
+                        <Avatar name={r.name} age={r.age} busy={r.busy} />
+                        <span className="worker-main">
+                          <Link to={`/freelancers/${r.freelancerId}`}>{r.name}</Link>
+                          <span className="muted">
+                            Seen {formatAge(r.age)}
+                            {r.busy && ', on a gig'}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          className="worker-distance"
+                          onClick={() => {
+                            setFocus({ lat: r.lat, lng: r.lng });
+                            setHighlightId(r.pingId);
+                          }}
+                          title="Show on map"
+                        >
+                          {r.distanceKm.toFixed(2)} km
+                          <span className="distance-track" aria-hidden="true">
+                            <span style={{ width: `${Math.min(100, (r.distanceKm / 5) * 100)}%` }} />
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ))}
+            </aside>
           </div>
         </>
       )}
-
-      <Card title="Location updates" subtitle="Each worker’s phone reports where they are">
-        {stats.isPending && <Loading />}
-        {stats.isError && <ErrorState error={stats.error} onRetry={() => stats.refetch()} />}
-        {stats.data && (
-          <>
-            <div className="stats-grid">
-              <StatCard label="Locations stored" value={formatInt(stats.data.totalPings)} hint="approximate" />
-              <StatCard label="Available" value={formatInt(stats.data.availablePings)} hint="locations from available workers" />
-              <StatCard label="Newest location" value={formatDateTime(stats.data.newestPingAt)} />
-              <StatCard label="Oldest location" value={formatDateTime(stats.data.oldestPingAt)} />
-            </div>
-            <p className="muted">
-              Locations are kept for {stats.data.ttlSeconds ? `${stats.data.ttlSeconds / 3600} hours` : 'a limited time'} and then
-              removed automatically, so the map only shows where workers are now.
-            </p>
-          </>
-        )}
-      </Card>
-
-      <details className="explain">
-        <summary>How this works</summary>
-        <ol className="explain-list">
-          <li>
-            <code>$geoNear</code> (must be the first stage) walks the <code>2dsphere</code> index of <code>WorkerLocations</code>{' '}
-            outward from the job site, keeps <code>is_available: true</code> pings within <code>maxDistance: 5000</code> m and adds{' '}
-            <code>distance_meters</code>. Part A had no <code>maxDistance</code>; we added it.
-          </li>
-          <li>
-            <strong>Latest pings</strong> = the Part A pipeline: <code>$limit 5</code>, <code>$project</code>. Each worker has ~250
-            pings, so one worker can fill several places.
-          </li>
-          <li>
-            <strong>Workers</strong> adds <code>$sort</code> newest-first, <code>$group</code> by <code>freelancer_id</code> with{' '}
-            <code>$first</code> (= latest ping), then sorts by distance again because <code>$group</code> loses order.
-          </li>
-          <li>Names and “gig in progress” come from PostgreSQL in one query, joined on <code>freelancer_id</code>.</li>
-          <li>
-            A TTL index on <code>created_at</code> deletes pings after 2 hours. The seeder gives every ping the same{' '}
-            <code>created_at</code>, so all seeded pings disappear together; “Add fresh pings” inserts new ones with the same
-            document shape.
-          </li>
-          {nearby.data && <li>Last query: {nearby.data.queryMs} ms.</li>}
-        </ol>
-      </details>
     </>
   );
 }

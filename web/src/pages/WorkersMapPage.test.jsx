@@ -9,7 +9,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WorkersMapPage } from './WorkersMapPage.jsx';
 
 vi.mock('../components/mongo/WorkerMap.jsx', () => ({
-  AGE_BUCKETS: [{ maxSeconds: Infinity, color: '#7c8786', label: 'any age' }],
+  AGE_BUCKETS: [{ maxSeconds: Infinity, color: '#7c8786', dot: '#a3aab5', label: 'any age' }],
+  MAP_STYLES: [{ id: 'night', label: 'Night' }, { id: 'streets', label: 'Streets' }],
   colorForAge: () => '#7c8786',
   WorkerMap: ({ results, onPick }) => (
     <button type="button" data-testid="map" onClick={() => onPick({ lat: 28.55, lng: 77.25 })}>
@@ -18,7 +19,7 @@ vi.mock('../components/mongo/WorkerMap.jsx', () => ({
   ),
 }));
 
-const ORIGIN = { lng: 77.209, lat: 28.6139, label: 'Part A job site (Janpath)', jobSite: 'part-a' };
+const ORIGIN = { lng: 77.209, lat: 28.6139, label: 'Janpath', jobSite: 'part-a' };
 
 const worker = (over) => ({
   pingId: 'p1',
@@ -101,11 +102,14 @@ test('lists available workers nearest first, around the Part A job site by defau
   const rows = [...container.querySelectorAll('.worker-item')].map((li) => li.textContent);
   expect(rows[0]).toContain('Asha Rao');
   expect(rows[0]).toContain('0.42 km');
-  expect(rows[0]).toContain('3 pings here');
   expect(rows[1]).toContain('Ravi Kumar');
   expect(rows[1]).toContain('1.75 km');
-  expect(rows[1]).toContain('gig in progress');
+  expect(rows[1]).toContain('on a gig');
   expect(screen.getByTestId('map')).toHaveTextContent('map with 2 dots');
+
+  // client-facing view only: no raw-pings tab, no database statistics
+  expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  expect(screen.queryByText('Location updates')).not.toBeInTheDocument();
 
   const first = nearbyCalls(fetchMock)[0];
   expect(first).toContain('jobSite=part-a');
@@ -134,24 +138,12 @@ test('shows an error with Try again when MongoDB is unavailable, and recovers', 
   expect(await screen.findByRole('link', { name: 'Asha Rao' })).toBeInTheDocument();
 });
 
-test('Latest pings runs the Part A pipeline (5 nearest) and disables the ping-age filter', async () => {
+test('Last seen adds maxAgeMinutes to the workers query', async () => {
   const fetchMock = stubApi(() => json(nearbyBody([worker()])));
   renderPage();
   await screen.findByRole('link', { name: 'Asha Rao' });
 
-  expect(screen.getByLabelText('Ping age')).toBeEnabled();
-  await userEvent.click(screen.getByRole('tab', { name: /Latest pings/ }));
-
-  await waitFor(() => expect(nearbyCalls(fetchMock).some((u) => u.includes('mode=pings'))).toBe(true));
-  expect(screen.getByLabelText('Ping age')).toBeDisabled();
-});
-
-test('Ping age adds maxAgeMinutes to the workers query', async () => {
-  const fetchMock = stubApi(() => json(nearbyBody([worker()])));
-  renderPage();
-  await screen.findByRole('link', { name: 'Asha Rao' });
-
-  await userEvent.selectOptions(screen.getByLabelText('Ping age'), '15');
+  await userEvent.selectOptions(screen.getByLabelText('Last seen'), '15');
   await waitFor(() => expect(nearbyCalls(fetchMock).some((u) => u.includes('maxAgeMinutes=15'))).toBe(true));
 });
 
@@ -185,4 +177,56 @@ test('clicking the map searches around the clicked point and keeps it in the URL
   expect(await screen.findByRole('link', { name: 'Clicked Point Worker' })).toBeInTheDocument();
   expect(screen.getByTestId('location')).toHaveTextContent('lat=28.55000&lng=77.25000');
   expect(nearbyCalls(fetchMock).some((u) => u.includes('lat=28.55000') && u.includes('lng=77.25000'))).toBe(true);
+});
+
+test('spotlights the nearest worker with distance and a travel estimate', async () => {
+  stubApi(() => json(nearbyBody([worker({ distanceKm: 1.5 }), worker({ pingId: 'p2', freelancerId: 'f2', name: 'Ravi Kumar', distanceKm: 3.2 })])));
+  const { container } = renderPage();
+  await screen.findByRole('link', { name: 'Asha Rao' });
+
+  const spotlight = container.querySelector('.spotlight');
+  expect(spotlight).toHaveTextContent('Asha Rao');
+  expect(spotlight).toHaveTextContent('1.50 km');
+  expect(spotlight).toHaveTextContent('about 5 min by scooter');
+  expect(screen.getByRole('link', { name: 'View profile' })).toHaveAttribute('href', '/freelancers/f1');
+  // grouped by distance band
+  expect(screen.getByText('1 to 3 km')).toBeInTheDocument();
+  expect(screen.getByText('3 to 5 km')).toBeInTheDocument();
+});
+
+test('a job site that does not exist shows a way back instead of Try again', async () => {
+  stubApi(() => json({ error: { code: 'UNKNOWN_JOB_SITE', message: 'Unknown job site.' } }, 400));
+  renderPage('/workers?site=mars');
+
+  expect(await screen.findByText('We couldn’t find that location')).toBeInTheDocument();
+  expect(screen.getByText(/That job site does not exist/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Add fresh pings' })).toBeDisabled();
+
+  await userEvent.click(screen.getByRole('button', { name: 'Go to the default job site' }));
+  expect(screen.getByTestId('location')).toHaveTextContent(/^$/);
+});
+
+test('the map style switch changes the look and is remembered', async () => {
+  stubApi(() => json(nearbyBody([worker()])));
+  window.localStorage.removeItem('gigtask.mapLook');
+  renderPage();
+  await screen.findByRole('link', { name: 'Asha Rao' });
+
+  expect(screen.getByRole('button', { name: 'Night' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(screen.getByRole('button', { name: 'Streets' }));
+  expect(screen.getByRole('button', { name: 'Streets' })).toHaveAttribute('aria-pressed', 'true');
+  expect(window.localStorage.getItem('gigtask.mapLook')).toBe('streets');
+});
+
+test('Simulate workers moving adds a batch as soon as it is switched on', async () => {
+  const fetchMock = stubApi(() => json(nearbyBody([worker()])));
+  renderPage();
+  await screen.findByRole('link', { name: 'Asha Rao' });
+
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Simulate workers moving' }));
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([u, init]) => u === '/api/workers/pings/simulate' && init?.method === 'POST')).toBe(true),
+  );
+  await userEvent.click(screen.getByRole('checkbox', { name: 'Simulate workers moving' })); // stop the timer
 });

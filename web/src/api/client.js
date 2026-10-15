@@ -11,6 +11,16 @@ const USER_MESSAGES = {
   CONTRACT_NOT_FOUND: 'That contract does not exist.',
   INVALID_STATUS_TRANSITION: 'This contract cannot move to that status.',
   CONCURRENT_UPDATE: 'This record changed during your request. Please try again.',
+  // Workers map and reviews
+  UNKNOWN_JOB_SITE: 'That job site does not exist. Pick one from the list or click the map.',
+  ORIGIN_REQUIRED: 'Choose a job site or click a point on the map.',
+  INVALID_NUMBER: 'One of the values in this request is out of range.',
+  INVALID_ID: 'That link is not valid. It may have been copied incompletely.',
+  INVALID_PERIOD: 'Choose a period of 30 days, 90 days, 1 year or all time.',
+  INVALID_RATING: 'Choose a rating from 1 to 5 stars.',
+  INVALID_DATE: 'Enter dates as YYYY-MM-DD.',
+  INVALID_JSON: 'The request could not be read. Please try again.',
+  NOT_FOUND: 'That page does not exist.',
 };
 
 function displayMessage(status, code) {
