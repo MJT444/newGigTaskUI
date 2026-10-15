@@ -4,24 +4,14 @@
 // differs per document (from the seeder: certifications ~70%, years_experience
 // ~50%, bio ~40%, hourly_rate ~30%, languages ~20%). That variation is why it
 // lives in MongoDB. The card renders whatever is present, says what is
-// missing, and can show the raw document.
-import { useState } from 'react';
+// missing (struck through).
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
 import { formatMoney } from '../../lib/format.js';
 import { QueryState } from '../StateViews.jsx';
-import { Button, Card, DetailList } from '../ui.jsx';
-
-const FIELD_LABELS = {
-  certifications: 'Certifications',
-  years_experience: 'Years of experience',
-  bio: 'Bio',
-  hourly_rate: 'Hourly rate',
-  languages: 'Languages',
-};
+import { Card, DetailList } from '../ui.jsx';
 
 export function PortfolioCard({ freelancerId }) {
-  const [showRaw, setShowRaw] = useState(false);
   const q = useQuery({
     queryKey: ['portfolio', freelancerId],
     queryFn: () => api.get(`/api/freelancers/${freelancerId}/portfolio`),
@@ -47,14 +37,6 @@ export function PortfolioCard({ freelancerId }) {
                     </span>
                   ))}
                 </div>
-                <div className="field-presence" aria-label="Profile details filled in">
-                  {d.presentOptionalFields.map((k) => (
-                    <span key={k} className="present">✓ {FIELD_LABELS[k]}</span>
-                  ))}
-                  {d.missingOptionalFields.map((k) => (
-                    <span key={k} className="absent">{FIELD_LABELS[k]}</span>
-                  ))}
-                </div>
               </div>
 
               {p.bio && <p className="portfolio-bio">{p.bio}</p>}
@@ -76,21 +58,6 @@ export function PortfolioCard({ freelancerId }) {
                 </div>
               )}
 
-              <div className="portfolio-footer">
-                <span className="muted">Profiles differ: each one stores only the details the freelancer added.</span>
-                <Button variant="ghost" size="sm" onClick={() => setShowRaw((s) => !s)} aria-expanded={showRaw}>
-                  {showRaw ? 'Hide' : 'Show'} stored document
-                </Button>
-              </div>
-              {showRaw && (
-                <>
-                  <p className="muted">
-                    MongoDB <code>Portfolios</code> document <code>{String(p._id)}</code>; <code>freelancer_id</code> = PostgreSQL{' '}
-                    <code>freelancers.id</code>.
-                  </p>
-                  <pre className="raw-json">{JSON.stringify(p, null, 2)}</pre>
-                </>
-              )}
             </div>
           );
         }}
