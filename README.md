@@ -173,5 +173,5 @@ Work was divided by screen. Each member owned the design and the code for their 
 ## Repository and submission
 
 - GitHub repo link: [https://github.com/MJT444/newGigTaskUI](https://github.com/MJT444/newGigTaskUI)
-- Previously recorded final commit hash: `ec710ef`.
+- Previously recorded final commit hash: `dd4883f`.
 - Demo video: [watch on Google Drive](https://drive.google.com/file/d/1-9lna9s5lECwPm5uzjLuKOdSvk2leRoV/view?usp=drivesdk)
