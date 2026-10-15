@@ -1,0 +1,45 @@
+# Databases only. The API and web app run with npm (see README), which keeps
+# hot reload and makes debugging easier.
+#
+#   docker compose up -d        start PostgreSQL 16 + MongoDB 8
+#   docker compose down         stop (data is kept in volumes)
+#   docker compose down -v      stop and delete all data
+#
+# Host ports are 5433 / 27018 (not the defaults) so they never clash with a
+# PostgreSQL or MongoDB already installed on the computer.
+# User / password / database match the inherited seeders' defaults
+# (postgres / gigtask / gigtask), so the original README commands also work.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: gigtask
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: gigtask
+      TZ: Asia/Kolkata   # calendar days (analytics, date filters) in Indian time
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gigtask"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mongo:
+    image: mongo:8.0
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  mongodata:
