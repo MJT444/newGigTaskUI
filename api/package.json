@@ -1,0 +1,22 @@
+{
+  "name": "gigtask-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Thin HTTP layer over the inherited GigTask PostgreSQL + MongoDB databases",
+  "type": "module",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "test:integration": "node --test integration-tests/fund.int.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "mongodb": "^6.12.0",
+    "pg": "^8.13.1"
+  }
+}
