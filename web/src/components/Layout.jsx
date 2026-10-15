@@ -4,12 +4,12 @@ import { useActor } from '../context/ActorContext.jsx';
 import { ClientSearch } from './pickers.jsx';
 
 const NAV = [
-  { to: '/explore', label: 'Explore', db: 'pg' },
-  { to: '/fund', label: 'Fund gig', db: 'pg' },
-  { to: '/escrow', label: 'Escrow', db: 'pg' },
-  { to: '/analytics', label: 'Analytics', db: 'pg' },
-  { to: '/workers', label: 'Workers map', db: 'mongo' },
-  { to: '/reviews', label: 'Reviews', db: 'mongo' },
+  { to: '/explore', label: 'Explore' },
+  { to: '/fund', label: 'Fund gig' },
+  { to: '/escrow', label: 'Escrow' },
+  { to: '/analytics', label: 'Analytics' },
+  { to: '/workers', label: 'Workers map' },
+  { to: '/reviews', label: 'Reviews' },
 ];
 
 export function Layout() {
@@ -47,7 +47,6 @@ export function Layout() {
                 onClick={() => setMenuOpen(false)}
               >
                 {n.label}
-                <span className={`db-tag db-${n.db}`}>{n.db === 'pg' ? 'PG' : 'Mongo'}</span>
               </NavLink>
             ))}
           </nav>

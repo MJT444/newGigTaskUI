@@ -116,10 +116,6 @@ h3 { font-size: 1rem; }
 }
 .nav-link:hover { color: var(--text); background: var(--surface-2); }
 .nav-link-active { color: var(--accent); background: var(--accent-soft); }
-.db-tag {
-  font-size: 0.66rem; font-weight: 600; letter-spacing: 0.02em;
-  padding: 1px 5px; border-radius: 4px; border: 1px solid currentColor; opacity: 0.7;
-}
 .topbar-right { grid-area: controls; display: flex; align-items: center; gap: 16px; }
 .acting-as { display: flex; align-items: center; gap: 8px; }
 .acting-label { font-size: 0.78rem; color: var(--muted); }
